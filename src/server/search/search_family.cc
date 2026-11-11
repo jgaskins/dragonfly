@@ -3851,6 +3851,24 @@ void CmdFtProfile(CmdArgParser parser, CommandContext* cmd_cntx) {
                               absl::MakeSpan(profile_results), took, rb, limited);
 }
 
+// Merges lists that are each sorted into one sorted list without repeats. Every round merges
+// neighbouring lists in pairs, so each value moves only log2(lists.size()) times.
+static StringVec MergeSortedUnique(vector<StringVec> lists) {
+  for (size_t step = 1; step < lists.size(); step *= 2) {
+    for (size_t i = 0; i + step < lists.size(); i += 2 * step) {
+      StringVec merged;
+      merged.reserve(lists[i].size() + lists[i + step].size());
+      std::merge(make_move_iterator(lists[i].begin()), make_move_iterator(lists[i].end()),
+                 make_move_iterator(lists[i + step].begin()),
+                 make_move_iterator(lists[i + step].end()), back_inserter(merged));
+      lists[i] = std::move(merged);
+    }
+  }
+  StringVec& vec = lists.front();
+  vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
+  return std::move(vec);
+}
+
 void CmdFtTagVals(CmdArgParser parser, CommandContext* cmd_cntx) {
   string_view index_name = parser.Next();
   string_view field_name = parser.Next();
@@ -3883,18 +3901,7 @@ void CmdFtTagVals(CmdArgParser parser, CommandContext* cmd_cntx) {
   }
 
   shard_results.clear();
-  for (size_t step = 1; step < lists.size(); step *= 2) {
-    for (size_t i = 0; i + step < lists.size(); i += 2 * step) {
-      StringVec merged;
-      merged.reserve(lists[i].size() + lists[i + step].size());
-      std::merge(make_move_iterator(lists[i].begin()), make_move_iterator(lists[i].end()),
-                 make_move_iterator(lists[i + step].begin()),
-                 make_move_iterator(lists[i + step].end()), back_inserter(merged));
-      lists[i] = std::move(merged);
-    }
-  }
-  StringVec& vec = lists.front();
-  vec.erase(std::unique(vec.begin(), vec.end()), vec.end());
+  StringVec vec = MergeSortedUnique(std::move(lists));
 
   rb->SendBulkStrArr(vec, CollectionType::SET);
 }
